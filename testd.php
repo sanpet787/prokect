@@ -668,15 +668,7 @@ $questions = [
       #exportBtns { display: none !important; }
     }
     .panel-header { font-size:1.25rem; font-weight:700; color:#2563eb; background:#f1f5f9; border-radius:0.7rem 0.7rem 0 0; padding:1rem 1.5rem; cursor:pointer; display:flex; align-items:center; justify-content:space-between; }
-    .panel-content {
-      display: block !important; /* บังคับให้ block เสมอ */
-      overflow: hidden;
-      max-height: 0;
-      transition: max-height 0.4s cubic-bezier(.4,2,.6,1);
-    }
-    .panel-content.open {
-      max-height: 2000px; /* หรือค่าที่มากพอให้เนื้อหาแสดงครบ */
-    }
+    .panel-content { display:none; background:#fff; border-radius:0 0 0.7rem 0.7rem; border:1px solid #e0e7ef; border-top:none; padding:1.5rem; }
     .panel.active .panel-content { display:block; }
     .panel { margin-bottom:2rem; box-shadow:0 2px 12px #38bdf822; border-radius:0.7rem; }
     .panel-header svg { transition:transform 0.2s; }
@@ -925,9 +917,28 @@ $questions = [
         id="irp-panel"
         class="panel-content"
         data-testid="irp-panel"
+        style="overflow:hidden;max-height:0;transition:max-height 0.4s cubic-bezier(.4,2,.6,1);"
         aria-hidden="true"
       >
-        <!-- ...เนื้อหา... -->
+        <!-- ...เนื้อหา IRP เดิม... -->
+        <div class="summary-card mb-6" id="incidentSummary"></div>
+        <div class="mb-6">
+          <div class="font-bold text-lg mb-2">CIRT Team Roles</div>
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Responsibility</th>
+              </tr>
+            </thead>
+            <tbody id="cirtRolesRows"></tbody>
+          </table>
+        </div>
+        <div>
+          <div class="font-bold text-lg mb-2">Incident Response Phases</div>
+          <div class="stepper" id="irpStepper"></div>
+        </div>
       </div>
     </div>
     <div class="export-btns print:hidden">
@@ -969,14 +980,16 @@ $questions = [
     </div>
   </div>
 </div>
+<div id="app" class="container mx-auto px-4 py-8">
+  <!-- โค้ด JavaScript จะแทรก UI ในนี้ -->
+</div>
 <script>
 // ---------------------------
 // ส่วน: ค่าคงที่/การตั้งค่า
 // ---------------------------
-const QUESTIONS = <?php echo json_encode($questions); ?>; // ดึงคำถามจาก PHP
-const SCORE_MAP = { yes: 0, partial: 1, no: 2 }; // กำหนดคะแนนแต่ละตัวเลือก
-const LABEL_MAP = { yes: "ใช่", partial: "ไม่แน่ใจ", no: "ไม่ใช่" }; // แปลงค่าตัวเลือกเป็นข้อความ
-const RISK_LEVEL = { 2: '<span class="risk-high">เสี่ยงสูง</span>', 1: '<span class="risk-medium">เสี่ยงปานกลาง</span>', 0: '<span class="risk-low">เสี่ยงต่ำ</span>' };
+const QUESTIONS = <?php echo json_encode($questions); ?>;
+const SCORE_MAP = { yes: 0, partial: 1, no: 2 };
+const LABEL_MAP = { yes: "ใช่", partial: "ไม่แน่ใจ", no: "ไม่ใช่" };
 const SECTION_ICONS = {
   "การจัดการข้อมูล": "🗂️",
   "การควบคุมสิทธิ์": "🔑",
@@ -990,310 +1003,675 @@ const SECTION_ICONS = {
   "โครงสร้างพื้นฐาน": "🌐",
   "Cloud/คลาวด์": "☁️"
 };
-
-let current = 0; // ข้อที่กำลังแสดง
-let responses = []; // เก็บคำตอบแต่ละข้อ
-
-// ---------------------------
-// ฟังก์ชันคืนค่าคำอธิบายศัพท์เฉพาะ (tooltip)
-// ---------------------------
-function getQuestionHint(q) {
-  // ตรวจสอบว่าคำถามมีศัพท์เฉพาะหรือไม่ แล้วคืนคำอธิบาย
-  if(q.text.includes("RTO/RPO")) return 'RTO (Recovery Time Objective) คือเวลาสูงสุดที่ระบบต้องกลับมาใช้งานได้หลังเกิดเหตุ<br>RPO (Recovery Point Objective) คือข้อมูลล่าสุดที่ต้องการให้กู้คืนได้';
-  if(q.text.includes("2FA") || q.text.includes("MFA")) return '2FA/MFA คือการยืนยันตัวตนแบบสองขั้น เช่น รหัสผ่าน+OTP หรือรหัสผ่าน+แอป';
-  if(q.text.includes("SIEM")) return 'SIEM คือระบบรวม log เพื่อวิเคราะห์และแจ้งเตือนเหตุผิดปกติ';
-  if(q.text.includes("Immutable")) return 'Immutable Backup คือข้อมูลสำรองที่ไม่สามารถแก้ไขหรือลบได้โดยผู้โจมตี';
-  if(q.text.includes("Playbook")) return 'Playbook คือคู่มือหรือขั้นตอนปฏิบัติเมื่อเกิดเหตุการณ์ เช่น ฟิชชิงหรือมัลแวร์';
-  if(q.text.includes("BCP/DR")) return 'BCP (Business Continuity Plan) คือแผนความต่อเนื่องทางธุรกิจ<br>DR (Disaster Recovery) คือแผนกู้คืนระบบหลังเกิดเหตุ';
-  if(q.text.includes("PDPA")) return 'PDPA คือกฎหมายคุ้มครองข้อมูลส่วนบุคคลของไทย';
-  if(q.text.includes("CERT")) return 'CERT คือทีมตอบสนองเหตุการณ์ความปลอดภัยไซเบอร์ (เช่น ThaiCERT)';
-  if(q.text.includes("EDR")) return 'EDR คือซอฟต์แวร์ป้องกันและตรวจจับภัยคุกคามบนเครื่องคอมพิวเตอร์';
-  if(q.text.includes("Asset Inventory")) return 'Asset Inventory คือรายการอุปกรณ์/ระบบทั้งหมดในองค์กร';
-  if(q.text.includes("Firewall")) return 'Firewall คือระบบป้องกันและควบคุมการรับส่งข้อมูลเครือข่าย';
-  if(q.text.includes("Cloud") || q.text.includes("คลาวด์")) return 'Cloud คือระบบหรือบริการที่อยู่บนอินเทอร์เน็ต เช่น AWS, Azure, Google Cloud';
-  // เพิ่ม tip อื่นๆ ได้ที่นี่
-  return "";
-}
+let responses = [];
+let current = 0;
 
 // ---------------------------
-// ฟังก์ชันแสดงคำถามทีละข้อ
+// แสดง UI หลักเมื่อโหลดหน้า
 // ---------------------------
-function renderQuestion(idx) {
-  // สร้าง HTML สำหรับแสดงคำถามและตัวเลือก
-  const q = QUESTIONS[idx];
-  let val = responses[idx]?.choice || "";
-  let icon = q.icon || SECTION_ICONS[q.section] || "🔒";
-  let html = `<div class="question-card">
-    <div style="font-size:2em; margin-bottom:0.2em;">${icon}</div>
-    <div class="question-section">${q.section ? icon + " " + q.section : ""}</div>
-    <div class="question-number">ข้อที่ ${idx+1} / ${QUESTIONS.length}</div>
-    <div class="font-medium text-lg text-slate-800 mb-1" style="line-height:1.5">
-      ${q.text}
-      ${getQuestionHint(q) ? `<button type="button" tabindex="-1" style="background:none;border:none;cursor:pointer;padding:0;margin-left:6px;" title="ดูคำอธิบาย" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='block'?'none':'block'">
-        <span style="display:inline-block;width:1.2em;height:1.2em;background:#e0f2fe;color:#0ea5e9;border-radius:50%;font-size:0.95em;text-align:center;line-height:1.2em;font-weight:bold;">?</span>
-      </button>
-      <span class="question-hint" style="display:none;background:#f1f5f9;border-radius:0.5em;padding:0.6em 1em;margin-top:0.5em;display:block;color:#0ea5e9;font-size:0.97em;">${getQuestionHint(q)}</span>` : ""}
-    </div>
-    <div class="radio-group">`;
-  // วนลูปสร้าง radio button สำหรับแต่ละตัวเลือก
-  [["yes","ใช่"],["partial","ไม่แน่ใจ"],["no","ไม่ใช่"]].forEach(([v,l])=>{
-    html += `<label>
-      <input type="radio" name="choice" value="${v}" class="accent-cyan-500" ${val===v?"checked":""}>
-      <span>${l}</span>
-    </label>`;
-  });
-  html += `</div>
-    <input type="text" name="comment" placeholder="หมายเหตุ (ถ้ามี)" value="${responses[idx]?.comment ? responses[idx].comment.replace(/"/g,'&quot;') : ""}">
-  </div>`;
-  // แสดงผลใน questionBox
-  document.getElementById('questionBox').innerHTML = html;
-  // อัปเดต progress bar
-  document.getElementById('progressBar').style.width = `${Math.round((idx+1)/QUESTIONS.length*100)}%`;
-  // ซ่อนปุ่มย้อนกลับถ้าเป็นข้อแรก
-  document.getElementById('prevBtn').style.display = idx === 0 ? "none" : "";
-  // เปลี่ยนข้อความปุ่มถัดไปถ้าเป็นข้อสุดท้าย
-  document.getElementById('nextBtn').textContent = idx === QUESTIONS.length-1 ? "ดูผลสรุป" : "ถัดไป";
-}
-
-// ---------------------------
-// ฟังก์ชันบันทึกคำตอบปัจจุบัน
-// ---------------------------
-function saveCurrent() {
-  // อ่านค่าที่เลือกและหมายเหตุ แล้วเก็บลง responses
-  const q = QUESTIONS[current];
-  const choice = document.querySelector('input[name="choice"]:checked');
-  const comment = document.querySelector('input[name="comment"]').value;
-  if(choice) {
-    responses[current] = { choice: choice.value, comment };
+document.addEventListener('DOMContentLoaded', function() {
+  // ตรวจสอบว่ามี responses หรือไม่
+  if (sessionStorage.getItem('cyberResponses')) {
+    responses = JSON.parse(sessionStorage.getItem('cyberResponses'));
+    renderResultsView();
+  } else {
+    renderQuestionView();
   }
+});
+
+// ---------------------------
+// แสดงหน้าคำถาม
+// ---------------------------
+function renderQuestionView() {
+  document.getElementById('app').innerHTML = `
+    <div class="progress-container">
+      <div class="progress-bar" style="width: 0%"></div>
+    </div>
+    <div id="questionContainer" class="fade-in"></div>
+    <div class="btn-container">
+      <button id="prevBtn" class="btn-secondary" onclick="prevQuestion()">ย้อนกลับ</button>
+      <button id="nextBtn" class="btn-main" onclick="nextQuestion()">ต่อไป</button>
+    </div>
+  `;
+  showQuestion(current);
 }
 
 // ---------------------------
-// ฟังก์ชันแสดงผลสรุป
+// แสดงผลลัพธ์
 // ---------------------------
-function showSummary() {
-  document.getElementById('summarySection').style.display = "block";
+function renderResultsView() {
+  document.getElementById('app').innerHTML = `
+    <div id="resultsContainer" class="fade-in">
+      <h2 class="text-center text-2xl font-bold mb-8">ผลการประเมินความเสี่ยงด้านไซเบอร์</h2>
+      <div id="mainBoxes" class="grid grid-cols-1 md:grid-cols-3 gap-6"></div>
+    </div>
+    <div id="mainModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 overflow-y-auto">
+      <div class="bg-white max-w-4xl mx-auto my-10 p-8 rounded-xl shadow-xl">
+        <div class="flex justify-between items-center mb-6">
+          <h3 class="text-xl font-bold" id="modalTitle">รายละเอียด</h3>
+          <button onclick="hideModal()" class="text-gray-500 hover:text-gray-700">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        <div id="modalBody" class="overflow-y-auto max-h-[70vh]"></div>
+      </div>
+    </div>
+  `;
+  renderMainBoxes();
+  
+  // เพิ่มปุ่ม "เริ่มประเมินใหม่"
+  document.getElementById('resultsContainer').insertAdjacentHTML('beforeend', `
+    <div class="text-center mt-10">
+      <button onclick="resetAssessment()" class="btn-secondary">เริ่มประเมินใหม่</button>
+    </div>
+  `);
+}
 
-  let ordered = [];
-  // --- แยกข้อเสี่ยงตามระดับ ---
-  let high = [], medium = [], low = [];
+// ---------------------------
+// ฟังก์ชันแสดงกล่องข้อความแต่ละส่วน
+// ---------------------------
+function renderMainBoxes() {
+  const boxes = [
+    { id: "box-summary", icon: "📊", title: "สรุปผลประเมิน", desc: "ดูสรุปผลคะแนน จุดแข็ง และจุดที่ต้องปรับปรุง", func: "showSummaryBox" },
+    { id: "box-high-risk", icon: "⚠️", title: "ข้อที่มีความเสี่ยงสูง", desc: "ดูรายการข้อที่มีความเสี่ยงสูงและแนวทางแก้ไข", func: "showHighRiskBox" },
+    { id: "box-risk", icon: "📈", title: "Risk Assessment", desc: "ดูผลประเมินความเสี่ยงโดยละเอียด", func: "showRiskBox" },
+    { id: "box-irp", icon: "🚨", title: "Incident Response Plan", desc: "ดูแผนตอบสนองเหตุการณ์ไซเบอร์", func: "showIRPBox" }
+  ];
+  
+  let html = `<div class="grid grid-cols-1 md:grid-cols-2 gap-6">`;
+  boxes.forEach(box => {
+    html += `
+      <div id="${box.id}" onclick="${box.func}()" class="bg-white rounded-xl shadow-lg p-6 cursor-pointer transform hover:scale-105 transition-all" style="border-left:6px solid #0ea5e9;">
+        <div class="flex items-center mb-4">
+          <span class="text-3xl mr-3">${box.icon}</span>
+          <h3 class="text-xl font-bold text-blue-800">${box.title}</h3>
+        </div>
+        <p class="text-slate-700 mb-4">${box.desc}</p>
+        <div class="text-right">
+          <button class="inline-flex items-center text-blue-600 hover:text-blue-800">
+            ดูรายละเอียด
+            <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    `;
+  });
+  html += `</div>`;
+  document.getElementById('mainBoxes').innerHTML = html;
+}
+
+// ---------------------------
+// ฟังก์ชันแสดงข้อมูลแต่ละกล่อง
+// ---------------------------
+function showSummaryBox() {
+  document.getElementById('modalTitle').textContent = "สรุปผลประเมิน";
+  document.getElementById('modalBody').innerHTML = `<div id="summaryResultBox" class="p-4"></div>`;
+  renderSummaryOnly(responses, QUESTIONS);
+  showModal();
+}
+
+function showHighRiskBox() {
+  document.getElementById('modalTitle').textContent = "ข้อที่มีความเสี่ยงสูง";
+  document.getElementById('modalBody').innerHTML = `<div id="highRiskResultBox" class="p-4"></div>`;
+  renderHighRiskOnly(responses, QUESTIONS);
+  showModal();
+}
+
+function showRiskBox() {
+  document.getElementById('modalTitle').textContent = "การประเมินความเสี่ยง (Risk Assessment)";
+  document.getElementById('modalBody').innerHTML = `<div id="riskResultBox" class="p-4"></div>`;
+  renderRiskOnly(responses, QUESTIONS);
+  showModal();
+}
+
+function showIRPBox() {
+  document.getElementById('modalTitle').textContent = "แผนตอบสนองเหตุการณ์ (Incident Response Plan)";
+  document.getElementById('modalBody').innerHTML = `<div id="irpResultBox" class="p-4"></div>`;
+  renderIRPOnly(responses, QUESTIONS);
+  showModal();
+}
+
+// ---------------------------
+// ฟังก์ชัน render เฉพาะแต่ละส่วน
+// ---------------------------
+function renderSummaryOnly(responses, QUESTIONS) {
   let total = 0;
-  for(let i=0;i<QUESTIONS.length;i++) {
+  let high = [], medium = [], low = [];
+  let sectionScores = {};
+  
+  // จัดกลุ่มคำถามตามหมวดหมู่
+  const sectionMap = {};
+  QUESTIONS.forEach((q, i) => {
+    if (!sectionMap[q.section]) sectionMap[q.section] = [];
+    sectionMap[q.section].push(i);
+  });
+
+  for(let i=0; i<QUESTIONS.length; i++) {
     const ans = responses[i]?.choice;
-    const score = SCORE_MAP[ans];
+    const score = SCORE_MAP[ans] || 0;
+    const section = QUESTIONS[i].section;
+    
+    if(!sectionScores[section]) {
+      sectionScores[section] = {total: 0, max: 0};
+    }
+    
+    sectionScores[section].max += 2; // คะแนนเต็มคือ 2 ต่อข้อ
     if(score > 0) {
       total += score;
+      sectionScores[section].total += score;
       if(score === 2) high.push(i);
       else if(score === 1) medium.push(i);
-      else low.push(i);
     }
   }
-  ordered = [...high, ...medium, ...low];
-
-  // --- Group by section for readability ---
-  let sectionMap = {};
-  for(const i of ordered) {
-    const sec = QUESTIONS[i].section || "อื่นๆ";
-    if(!sectionMap[sec]) sectionMap[sec] = [];
-    sectionMap[sec].push(i);
-  }
-
-  let html = `<div style="
-  background: #f8fafc;
-  border-radius: 1.5rem;
-  padding: 2.5rem 1.5rem;
-  box-shadow: 0 4px 32px #38bdf822;
-  font-family: 'Prompt', 'Sarabun', 'Segoe UI', Arial, sans-serif;
-  ">
-  <!-- <h2 style="
-    font-size:2.1rem;
-    font-weight: bold;
-    color: #0e2233;
-    margin-bottom: 2rem;
-    text-align:center;
-    letter-spacing:0.01em;
-    ">สรุปข้อที่ควรแก้ไข/มีความเสี่ยง (เรียงตามระดับและหมวด)</h2> -->
-  <div style="display:flex; flex-direction:column; gap:2.5rem;">`;
-
-  if (ordered.length === 0) {
-    html += `<div style="margin-top:2.5rem; text-align:center; color:#16a34a; font-size:1.3em; font-weight:600;">
-      ไม่พบข้อที่ต้องแก้ไขหรือมีความเสี่ยงสูง/ปานกลาง
-    </div>`;
-  } else {
-    for(const sec in sectionMap) {
-      let secIcon = SECTION_ICONS[sec] || "🔒";
-      html += `<div style="margin-bottom:1.5em;">
-        <div style="font-size:1.25em; font-weight:bold; color:#0ea5e9; margin-bottom:0.7em; display:flex;align-items:center;gap:0.5em;">
-          <span style="font-size:1.5em;">${secIcon}</span> <u>${sec}</u>
+  
+  // คำนวณคะแนนรวม
+  const maxScore = QUESTIONS.length * 2;
+  const percentage = Math.round((total / maxScore) * 100);
+  const riskLevel = 
+    percentage >= 75 ? {text: "ความเสี่ยงสูง", color: "#dc2626"} :
+    percentage >= 40 ? {text: "ความเสี่ยงปานกลาง", color: "#d97706"} : 
+                      {text: "ความเสี่ยงต่ำ", color: "#16a34a"};
+  
+  // จัดเรียงหมวดหมู่ตามระดับความเสี่ยง (มากไปน้อย)
+  const sortedSections = Object.keys(sectionScores).sort((a, b) => {
+    const scoreA = sectionScores[a].total / sectionScores[a].max;
+    const scoreB = sectionScores[b].total / sectionScores[b].max;
+    return scoreB - scoreA;
+  });
+  
+  let html = `
+    <div class="mb-8">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-xl font-bold">คะแนนรวม</h3>
+          <p class="text-slate-600">ประเมิน ${responses.filter(r => r?.choice).length} จากทั้งหมด ${QUESTIONS.length} ข้อ</p>
         </div>
-        <div style="display:flex; flex-direction:column; gap:1.5rem;">`;
-      for(const i of sectionMap[sec]) {
-        const ans = responses[i]?.choice;
-        const score = SCORE_MAP[ans];
-        const risk = QUESTIONS[i].risk;
-        const fix = QUESTIONS[i].fix;
-        const steps = QUESTIONS[i].steps;
-        const comment = responses[i]?.comment ? `<div style="margin-top:0.7em; font-size:1.05em; color:#64748b;"><b>หมายเหตุ:</b> ${responses[i].comment}</div>` : "";
-        let riskColor = score === 2 ? "#dc2626" : score === 1 ? "#d97706" : "#16a34a";
-        let riskLabel = score === 2 ? "เสี่ยงสูง" : score === 1 ? "เสี่ยงปานกลาง" : "เสี่ยงต่ำ";
-        let riskIcon = score === 2 ? "🔥" : score === 1 ? "⚠️" : "✅";
-        html += `
-        <div style="
-          background: #fff;
-          border-radius: 1.2rem;
-          box-shadow: 0 2px 12px #38bdf822;
-          padding: 1.2rem 1.2rem 1.2rem 1.2rem;
-          font-size: 1.13rem;
-          color: #0e2233;
-          border-left: 8px solid ${riskColor};
-          display: flex;
-          flex-direction: column;
-          gap: 0.7em;
-          ">
-          <div style="display:flex;align-items:center;gap:0.5em;">
-            <span style="font-size:1.3em;color:${riskColor};">${riskIcon}</span>
-            <span style="font-weight:600;">ข้อที่ ${i+1}:</span>
-            <span>${QUESTIONS[i].text}</span>
-          </div>
-          <div>
-            <span style="font-size:1.05em;"><b>คำตอบ:</b> <span style="color:#0ea5e9;">${LABEL_MAP[ans]||"-"}</span></span>
-            <span style="margin-left:1em; font-size:1.05em;">(คะแนน: <span class="score" style="color:#0ea5e9;">${score}</span>)</span>
-          </div>
-          <div>
-            <b>ระดับความเสี่ยง:</b> <span style="font-size:1.05em; color:${riskColor}; font-weight:bold;">${riskLabel}</span>
-          </div>
-          ${comment}
-          <details style="margin-top:0.5em;">
-            <summary style="cursor:pointer;font-weight:600;color:#0ea5e9;">รายละเอียดความเสี่ยงและแนวทางแก้ไข</summary>
-            <div style="margin-top:0.7em; color:#dc2626; font-size:1.05em;">
-              <b>⚠️ ความเสี่ยง:</b> ${risk}
-            </div>
-            <div style="margin-top:0.5em; color:#0ea5e9; font-size:1.05em;">
-              <b>💡 คำแนะนำ:</b> ${fix}
-            </div>
-            <div style="margin-top:0.5em;">
-              <b style="color:#0ea5e9;">🔹 ขั้นตอนการแก้ไข:</b>
-              <ul style="margin-left:1.5em; margin-top:0.3em; font-size:1.03em; color:#334155;">
-                ${steps.map(step=>`<li style="margin-bottom:0.2em;">${step}</li>`).join("")}
-              </ul>
-            </div>
-          </details>
-        </div>`;
-      }
-      html += `</div></div>`;
-    }
-  }
-
-  html += `</div>
-    <div style="margin-top:2.5rem; font-size:1.3em; font-weight:bold; text-align:center;">
-      คะแนนรวม (เฉพาะข้อเสี่ยง): <span class="score" style="color:#0ea5e9;">${total}</span> / ${QUESTIONS.length*2}
+        <div class="text-right">
+          <div class="text-3xl font-bold" style="color: ${riskLevel.color}">${percentage}%</div>
+          <div class="font-bold" style="color: ${riskLevel.color}">${riskLevel.text}</div>
+        </div>
+      </div>
+      
+      <div class="w-full bg-gray-200 rounded-full h-4 mt-2">
+        <div class="h-4 rounded-full" style="width: ${percentage}%; background-color: ${riskLevel.color}"></div>
+      </div>
     </div>
-    <div style="margin-top:0.7em; font-size:1.15em; text-align:center;">
-      ระดับความเสี่ยงรวม: ${
-        total >= QUESTIONS.length*1.5 ? '<span class="risk-high" style="font-size:1.1em;">ความเสี่ยงสูง</span>' :
-        total >= QUESTIONS.length*0.5 ? '<span class="risk-medium" style="font-size:1.1em;">ความเสี่ยงปานกลาง</span>' :
-        '<span class="risk-low" style="font-size:1.1em;">ความเสี่ยงต่ำ</span>'
-      }
+    
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded-md">
+        <h4 class="font-bold text-red-700 mb-2">พบจุดเสี่ยงสูง ${high.length} จุด</h4>
+        ${high.length > 0 ? 
+          `<ul class="list-disc pl-5 text-red-700">
+            ${high.slice(0, 5).map(i => `<li>${QUESTIONS[i].text}</li>`).join('')}
+            ${high.length > 5 ? `<li>และอีก ${high.length - 5} รายการ...</li>` : ''}
+          </ul>` : 
+          '<p class="text-slate-600">ไม่พบจุดเสี่ยงสูง</p>'
+        }
+      </div>
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-md">
+        <h4 class="font-bold text-amber-700 mb-2">พบจุดเสี่ยงปานกลาง ${medium.length} จุด</h4>
+        ${medium.length > 0 ? 
+          `<ul class="list-disc pl-5 text-amber-700">
+            ${medium.slice(0, 5).map(i => `<li>${QUESTIONS[i].text}</li>`).join('')}
+            ${medium.length > 5 ? `<li>และอีก ${medium.length - 5} รายการ...</li>` : ''}
+          </ul>` : 
+          '<p class="text-slate-600">ไม่พบจุดเสี่ยงปานกลาง</p>'
+        }
+      </div>
     </div>
-  </div>`;
-  document.getElementById('summary').innerHTML = html;
-  document.getElementById('summary').style.display = "block";
-
-  // แสดง pro results ต่อท้าย
-  renderProResults(responses, QUESTIONS);
-  setTimeout(()=>document.getElementById('proResultsSection').scrollIntoView({behavior:"smooth"}), 200);
+    
+    <h3 class="text-xl font-bold mb-4">ผลประเมินแยกตามหมวดหมู่</h3>
+    <div class="grid grid-cols-1 gap-4">
+      ${sortedSections.map(section => {
+        const sectionScore = sectionScores[section];
+        const sectionPercentage = Math.round((sectionScore.total / sectionScore.max) * 100);
+        let barColor;
+        if (sectionPercentage >= 75) barColor = "#dc2626";
+        else if (sectionPercentage >= 40) barColor = "#d97706";
+        else barColor = "#16a34a";
+        
+        return `
+          <div class="bg-white p-4 rounded-md shadow-sm">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center">
+                <span class="text-xl mr-2">${SECTION_ICONS[section] || '📋'}</span>
+                <h4 class="font-bold">${section}</h4>
+              </div>
+              <div class="text-right">
+                <span class="font-bold" style="color: ${barColor}">${sectionPercentage}%</span>
+              </div>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2">
+              <div class="h-2 rounded-full" style="width: ${sectionPercentage}%; background-color: ${barColor}"></div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+  
+  document.getElementById('summaryResultBox').innerHTML = html;
 }
 
-// ---------------------------
-// ฟังก์ชันเรียก AI จาก aiforthai (API)
-// ---------------------------
-async function callAISummary() {
-  // สร้างข้อความสรุปคำตอบ
-  let summaryText = QUESTIONS.map((q,i) => {
+function renderHighRiskOnly(responses, QUESTIONS) {
+  let highRiskIndexes = [];
+  for(let i=0; i<QUESTIONS.length; i++) {
     const ans = responses[i]?.choice;
-    if(ans) return `ข้อ: ${q.text}\nคำตอบ: ${LABEL_MAP[ans]}\n`;
-    return '';
-  }).filter(Boolean).join('\n');
-  try {
-    const res = await fetch("https://api.aiforthai.in.th/summarize", {
-      method: "POST",
-      headers: {
-        "Apikey": "SyvIiGOP07EK6fIcQdS20UWDjs79G7gP", // <-- ใช้ API KEY ที่ให้มา
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: "text=" + encodeURIComponent(summaryText)
-    });
-    const data = await res.json();
-    if(data && data.summary) {
-      document.getElementById('aiSummary').innerText = data.summary;
-    } else {
-      document.getElementById('aiSummary').innerText = "ไม่สามารถวิเคราะห์ผลลัพธ์ได้ในขณะนี้";
+    const score = SCORE_MAP[ans] || 0;
+    if(score === 2) highRiskIndexes.push(i);
+  }
+  
+  if(highRiskIndexes.length === 0) {
+    document.getElementById('highRiskResultBox').innerHTML = `
+      <div class="bg-green-50 p-6 rounded-lg text-center">
+        <div class="text-5xl mb-4">🎉</div>
+        <h3 class="text-xl font-bold text-green-700 mb-2">ไม่พบข้อที่เสี่ยงสูง</h3>
+        <p class="text-slate-600">ทุกรายการมีความเสี่ยงในระดับที่ยอมรับได้</p>
+      </div>
+    `;
+    return;
+  }
+  
+  let html = `
+    <div class="mb-6">
+      <div class="flex items-center justify-between">
+        <h3 class="text-xl font-bold text-red-700">พบข้อที่มีความเสี่ยงสูง ${highRiskIndexes.length} รายการ</h3>
+        <button onclick="printHighRiskReport()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center">
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2z"></path>
+          </svg>
+          พิมพ์รายงาน
+        </button>
+      </div>
+      <p class="text-slate-600 mb-4">กรุณาจัดการแก้ไขรายการต่อไปนี้โดยด่วน</p>
+    </div>
+    
+    <div class="space-y-6">
+      ${highRiskIndexes.map((i, idx) => {
+        const q = QUESTIONS[i];
+        const ans = responses[i]?.choice;
+        
+        return `
+          <div class="bg-white border-l-4 border-red-500 rounded-lg shadow-md p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h4 class="text-lg font-bold text-red-700">ข้อที่ ${i+1}: ${q.text}</h4>
+              <span class="bg-red-100 text-red-800 text-sm font-bold px-3 py-1 rounded-full">เสี่ยงสูง</span>
+            </div>
+            
+            <div class="space-y-3 mb-4">
+              <div><b>คำตอบ:</b> <span class="text-blue-600">${LABEL_MAP[ans]||"-"}</span></div>
+              <div><b>⚠️ ความเสี่ยง:</b> <span class="text-red-600">${q.risk}</span></div>
+              <div><b>💡 คำแนะนำ:</b> <span class="text-blue-600">${q.fix}</span></div>
+            </div>
+            
+            <div class="bg-slate-50 p-4 rounded-md">
+              <div class="font-bold mb-2 text-slate-700">🔹 ขั้นตอนการแก้ไข:</div>
+              <ol class="list-decimal pl-5 space-y-1 text-slate-700">
+                ${q.steps.map(step=>`<li>${step}</li>`).join("")}
+              </ol>
+            </div>
+            
+            ${responses[i]?.comment ? `
+              <div class="mt-4 bg-amber-50 p-3 rounded-md">
+                <div class="font-bold text-amber-800">หมายเหตุ:</div>
+                <div class="text-amber-700">${responses[i].comment}</div>
+              </div>
+            ` : ""}
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+  
+  document.getElementById('highRiskResultBox').innerHTML = html;
+}
+
+function renderRiskOnly(responses, QUESTIONS) {
+  const risk = getRiskData(responses, QUESTIONS);
+  
+  let html = `
+    <div class="mb-6">
+      <h3 class="text-xl font-bold mb-2">Risk Scenario Analysis</h3>
+      <p class="text-slate-600 mb-4">การวิเคราะห์สถานการณ์ความเสี่ยงด้านไซเบอร์</p>
+      
+      <div class="overflow-x-auto">
+        <table class="min-w-full bg-white border border-gray-200">
+          <thead>
+            <tr class="bg-gray-100 text-gray-700">
+              <th class="py-3 px-4 border-b text-left">Asset</th>
+              <th class="py-3 px-4 border-b text-left">Threat</th>
+              <th class="py-3 px-4 border-b text-left">Vulnerability</th>
+              <th class="py-3 px-4 border-b text-left">Impact</th>
+              <th class="py-3 px-4 border-b text-left">Risk Level</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${risk.matrixRows.map(r=>`
+              <tr class="border-b hover:bg-gray-50">
+                <td class="py-3 px-4">${r.asset}</td>
+                <td class="py-3 px-4">${r.threat}</td>
+                <td class="py-3 px-4">${r.vuln}</td>
+                <td class="py-3 px-4">${r.impact}</td>
+                <td class="py-3 px-4">
+                  <span class="px-2 py-1 rounded-full text-xs font-bold
+                    ${r.riskLevel === 'High' ? 'bg-red-100 text-red-700' : 
+                    r.riskLevel === 'Medium' ? 'bg-amber-100 text-amber-700' : 
+                    'bg-green-100 text-green-700'}">
+                    ${r.riskLevel}
+                  </span>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="mb-6">
+      <h3 class="text-xl font-bold mb-4">Risk Heatmap</h3>
+      
+      <div class="grid grid-cols-4 gap-px bg-gray-200 border border-gray-300">
+        <div class="bg-white p-3 text-center font-bold">Impact ↓ / Likelihood →</div>
+        <div class="bg-white p-3 text-center">Low (1)</div>
+        <div class="bg-white p-3 text-center">Medium (2)</div>
+        <div class="bg-white p-3 text-center">High (3)</div>
+        
+        ${[3, 2, 1].map(impact => `
+          <div class="bg-white p-3 text-center font-bold">${impact === 3 ? 'High' : impact === 2 ? 'Medium' : 'Low'} (${impact})</div>
+          ${[1, 2, 3].map(likelihood => {
+            const cell = risk.heatmap[impact-1][likelihood-1];
+            const count = cell.length;
+            let cellClass = "bg-white";
+            let textClass = "text-gray-500";
+            
+            if (count > 0) {
+              if (impact * likelihood >= 7) { 
+                cellClass = "bg-red-100"; 
+                textClass = "text-red-800";
+              } else if (impact * likelihood >= 4) { 
+                cellClass = "bg-amber-100"; 
+                textClass = "text-amber-800";
+              } else { 
+                cellClass = "bg-green-100"; 
+                textClass = "text-green-800";
+              }
+            }
+            
+            return `
+              <div class="${cellClass} p-3 text-center relative group cursor-pointer">
+                <span class="${textClass} font-bold">${count || '-'}</span>
+                ${ count > 0 ? `
+                  <div class="hidden group-hover:block absolute z-10 w-64 p-3 bg-white border shadow-lg rounded-md -left-1/3 top-full">
+                    <div class="font-bold mb-1">Impact: ${impact}, Likelihood: ${likelihood}</div>
+                    <div class="text-sm mb-2">
+                      Risk Level: <span class="${
+                        impact * likelihood >= 7 ? "text-red-700 font-bold" : 
+                        impact * likelihood >= 4 ? "text-amber-700 font-bold" : 
+                        "text-green-700 font-bold"
+                      }">${impact * likelihood >= 7 ? "High" : impact * likelihood >= 4 ? "Medium" : "Low"}</span>
+                    </div>
+                    <ul class="list-disc pl-4 text-sm">
+                      ${risk.matrixRows.filter(r => r.impact === impact && r.likelihood === likelihood)
+                        .map(r => `<li class="truncate" title="${r.asset}">${r.asset}</li>`)
+                        .join("")}
+                    </ul>
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          }).join("")}
+        `).join("")}
+      </div>
+      
+      <div class="flex items-center gap-4 mt-4 justify-center text-sm">
+        <div class="flex items-center">
+          <div class="w-4 h-4 rounded bg-red-100 border border-red-300 mr-1"></div>
+          <span>High Risk</span>
+        </div>
+        <div class="flex items-center">
+          <div class="w-4 h-4 rounded bg-amber-100 border border-amber-300 mr-1"></div>
+          <span>Medium Risk</span>
+        </div>
+        <div class="flex items-center">
+          <div class="w-4 h-4 rounded bg-green-100 border border-green-300 mr-1"></div>
+          <span>Low Risk</span>
+        </div>
+      </div>
+    </div>
+    
+    <div>
+      <h3 class="text-xl font-bold mb-4">Risk Response Strategy</h3>
+      
+      <div class="overflow-x-auto">
+        <table class="min-w-full bg-white border border-gray-200">
+          <thead>
+            <tr class="bg-gray-100 text-gray-700">
+              <th class="py-3 px-4 border-b text-left">Asset</th>
+              <th class="py-3 px-4 border-b text-left">Risk Level</th>
+              <th class="py-3 px-4 border-b text-left">Response Strategy</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${risk.responseRows.map(r=>`
+              <tr class="border-b hover:bg-gray-50">
+                <td class="py-3 px-4">${r.asset}</td>
+                <td class="py-3 px-4">
+                  <span class="px-2 py-1 rounded-full text-xs font-bold
+                    ${r.riskLevel === 'High' ? 'bg-red-100 text-red-700' : 
+                    r.riskLevel === 'Medium' ? 'bg-amber-100 text-amber-700' : 
+                    'bg-green-100 text-green-700'}">
+                    ${r.riskLevel}
+                  </span>
+                </td>
+                <td class="py-3 px-4">${r.response}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  
+  document.getElementById('riskResultBox').innerHTML = html;
+}
+
+function renderIRPOnly(responses, QUESTIONS) {
+  const irp = getIRPData(responses, QUESTIONS);
+  
+  let html = `
+    <div class="bg-blue-50 p-6 rounded-lg mb-6">
+      <h3 class="text-xl font-bold text-blue-800 mb-2">Incident Classification</h3>
+      <p class="text-slate-600 mb-2">จากการประเมินพบความเสี่ยงในเรื่อง:</p>
+      <div class="flex flex-wrap gap-2 mt-2">
+        ${irp.types.map(type => `
+          <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+            ${type}
+          </span>
+        `).join('')}
+      </div>
+    </div>
+    
+    <div class="mb-6">
+      <h3 class="text-xl font-bold mb-4">CIRT Team Roles</h3>
+      <p class="text-slate-600 mb-4">Computer Incident Response Team ที่ต้องเตรียมพร้อม</p>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        ${irp.cirtRoles.map(r=>`
+          <div class="bg-white shadow rounded-lg p-4">
+            <h4 class="font-bold text-lg text-blue-800">${r.role}</h4>
+            <p class="text-slate-700 mb-2">${r.name}</p>
+            <p class="text-slate-600 text-sm">${r.resp}</p>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+    
+    <div>
+      <h3 class="text-xl font-bold mb-4">Incident Response Phases</h3>
+      
+      <div class="relative">
+        ${irp.phases.map((p, i)=>`
+          <div class="mb-8 relative">
+            ${i < irp.phases.length - 1 ? `
+              <div class="absolute h-full w-1 bg-blue-200 left-4 top-4 z-0"></div>
+            ` : ''}
+            <div class="flex">
+              <div class="bg-blue-500 rounded-full w-8 h-8 flex items-center justify-center text-white font-bold z-10">
+                ${i + 1}
+              </div>
+              <div class="ml-4 flex-1">
+                <h4 class="text-lg font-bold text-blue-800 mb-2">${p.phase}</h4>
+                <div class="bg-white shadow rounded-lg overflow-hidden">
+                  <table class="min-w-full">
+                    <thead class="bg-gray-50">
+                      <tr>
+                        <th class="py-2 px-4 border-b text-left">Key Action</th>
+                        <th class="py-2 px-4 border-b text-left">Responsible</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${p.actions.map(a=>`
+                        <tr class="border-b hover:bg-gray-50">
+                          <td class="py-3 px-4">${a.task}</td>
+                          <td class="py-3 px-4">${a.who}</td>
+                        </tr>
+                      `).join("")}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+  
+  document.getElementById('irpResultBox').innerHTML = html;
+}
+
+// ---------------------------
+// พิมพ์รายงานข้อที่เสี่ยงสูง
+// ---------------------------
+function printHighRiskReport() {
+  let highRiskIndexes = [];
+  for(let i=0; i<QUESTIONS.length; i++) {
+    const ans = responses[i]?.choice;
+    const score = SCORE_MAP[ans] || 0;
+    if(score === 2) highRiskIndexes.push(i);
+  }
+  
+  if(highRiskIndexes.length === 0) {
+    alert("ไม่มีข้อที่เสี่ยงสูง");
+    return;
+  }
+  
+  let html = `<html><head>
+    <title>ข้อที่เสี่ยงสูง - Cyber Risk Assessment</title>
+    <style>
+      body { font-family: 'Prompt', 'Sarabun', Arial, sans-serif; margin: 0; padding: 20px; color: #333; }
+      .header { text-align: center; margin-bottom: 30px; }
+      .risk-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; border-left: 6px solid #dc2626; }
+      .risk-title { font-size: 18px; font-weight: bold; color: #dc2626; margin-bottom: 10px; }
+      .risk-detail { margin-bottom: 8px; }
+      .risk-step { margin-left: 20px; color: #555; }
+      .steps-container { background: #f8f9fa; padding: 15px; border-radius: 6px; margin: 10px 0; }
+      .page-break { page-break-after: always; }
+      @media print {
+        body { font-size: 12pt; }
+        .no-print { display: none; }
+      }
+    </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1 style="color:#dc2626;margin-bottom:5px;">รายงานข้อที่เสี่ยงสูง</h1>
+        <p>Cyber Risk Assessment Report</p>
+        <p style="color:#666;">วันที่: ${new Date().toLocaleDateString('th-TH', {year: 'numeric', month: 'long', day: 'numeric'})}</p>
+      </div>
+      
+      <p style="margin-bottom:20px;">พบข้อที่มีความเสี่ยงสูง <b>${highRiskIndexes.length}</b> รายการที่ต้องดำเนินการแก้ไขโดยด่วน</p>`;
+
+  highRiskIndexes.forEach((i, idx) => {
+    const q = QUESTIONS[i];
+    const ans = responses[i]?.choice;
+    
+    // เพิ่ม page break ทุก 2 รายการ
+    if (idx > 0 && idx % 2 === 0) {
+      html += '<div class="page-break"></div>';
     }
-  } catch(e) {
-    document.getElementById('aiSummary').innerText = "เกิดข้อผิดพลาดในการเชื่อมต่อ AI";
+    
+    html += `
+      <div class="risk-card">
+        <div class="risk-title">ข้อที่ ${i+1}: ${q.text}</div>
+        <div class="risk-detail"><b>หมวด:</b> ${q.section}</div>
+        <div class="risk-detail"><b>คำตอบ:</b> <span style="color:#0ea5e9;">${LABEL_MAP[ans]||"-"}</span></div>
+        <div class="risk-detail"><b>ระดับความเสี่ยง:</b> <span style="color:#dc2626;font-weight:bold;">เสี่ยงสูง</span></div>
+        <div class="risk-detail"><b>⚠️ ความเสี่ยง:</b> ${q.risk}</div>
+        <div class="risk-detail"><b>💡 คำแนะนำ:</b> ${q.fix}</div>
+        <div class="steps-container">
+          <div class="risk-detail"><b>🔹 ขั้นตอนการแก้ไข:</b></div>
+          <ol class="risk-step">
+            ${q.steps.map(step=>`<li>${step}</li>`).join("")}
+          </ol>
+        </div>
+        ${responses[i]?.comment ? `<div class="risk-detail" style="margin-top:10px;"><b>หมายเหตุ:</b> ${responses[i].comment}</div>` : ""}
+      </div>
+    `;
+  });
+
+  html += `
+      <div class="no-print" style="text-align:center;margin-top:30px;">
+        <button onclick="window.print()" style="background:#0ea5e9;color:#fff;font-weight:bold;padding:10px 20px;border-radius:5px;border:none;cursor:pointer;">พิมพ์รายงาน</button>
+      </div>
+    </body></html>`;
+
+  let win = window.open("", "_blank");
+  win.document.write(html);
+  win.document.close();
+}
+
+// ---------------------------
+// Modal สำหรับแสดงผล
+// ---------------------------
+function showModal() {
+  document.getElementById('mainModal').classList.remove('hidden');
+  document.getElementById('mainModal').classList.add('flex');
+}
+function hideModal() {
+  document.getElementById('mainModal').classList.add('hidden');
+  document.getElementById('mainModal').classList.remove('flex');
+}
+
+// ---------------------------
+// เริ่มประเมินใหม่
+// ---------------------------
+function resetAssessment() {
+  if(confirm('คุณต้องการเริ่มการประเมินใหม่ใช่หรือไม่? ข้อมูลเดิมจะถูกลบ')) {
+    sessionStorage.removeItem('cyberResponses');
+    responses = [];
+    current = 0;
+    renderQuestionView();
   }
 }
 
 // ---------------------------
-// จัดการปุ่มถัดไป/ย้อนกลับ
+// ฟังก์ชันคำนวณความเสี่ยง (แบบเต็ม)
 // ---------------------------
-document.getElementById('nextBtn').onclick = function() {
-  // เมื่อกดถัดไป: บันทึกคำตอบ, ไปข้อถัดไป หรือแสดงสรุป
-  saveCurrent();
-  if(current < QUESTIONS.length-1) {
-    current++;
-    renderQuestion(current);
-  } else {
-    // ตรวจสอบว่าตอบครบทุกข้อหรือยัง
-    let allAnswered = QUESTIONS.every((q,i) => responses[i]?.choice);
-    if(allAnswered) {
-      showSummary();
-      // scroll ไปยังสรุปผล
-      setTimeout(()=>document.getElementById('summarySection').scrollIntoView({behavior:"smooth"}), 200);
-    } else {
-      // ถ้ายังไม่ครบ ให้ไปข้อแรกที่ยังไม่ตอบ
-      let firstUnanswered = QUESTIONS.findIndex((q,i) => !responses[i]?.choice);
-      if(firstUnanswered !== -1) {
-        current = firstUnanswered;
-        renderQuestion(current);
-        alert("กรุณาตอบทุกข้อก่อนดูผลสรุป");
-      }
-    }
-  }
-};
-document.getElementById('prevBtn').onclick = function() {
-  // เมื่อกดย้อนกลับ: บันทึกคำตอบ, ย้อนกลับไปข้อก่อนหน้า
-  saveCurrent();
-  if(current > 0) {
-    current--;
-    renderQuestion(current);
-  }
-};
-document.getElementById('assessmentForm').onsubmit = function(e) {
-  // ป้องกันการ submit ฟอร์มแบบปกติ
-  e.preventDefault();
-  return false;
-};
-
-// ---------------------------
-// เริ่มต้นแสดงคำถามข้อแรก
-// ---------------------------
-renderQuestion(current);
-
-// ====== PRO REPORT LOGIC ======
 function getRiskData(responses, QUESTIONS) {
-  // For demo: asset = question, threat = risk, vuln = fix, consequence = risk
-  // Likelihood: 1=ใช่, 2=ไม่แน่ใจ, 3=ไม่ใช่
-  // Impact: ถ้ามีคำว่า "ข้อมูล", "ระบบ", "สูญหาย", "โจมตี" ให้ 3, อื่นๆ 2
-  // Risk Level: High (>=7), Medium (>=4), Low (<4)
-  // Response: High=Mitigate/Avoid, Medium=Mitigate/Transfer, Low=Accept/Monitor
   let riskRows = [];
   let matrixRows = [];
   let responseRows = [];
   let heatmap = [[[],[],[]],[[],[],[]],[[],[],[]]]; // [impact-1][likelihood-1]
+  
   for(let i=0;i<QUESTIONS.length;i++) {
     const ans = responses[i]?.choice;
     if(!ans) continue;
+    
     const asset = QUESTIONS[i].text;
     const threat = QUESTIONS[i].risk;
     const vuln = QUESTIONS[i].fix;
@@ -1303,17 +1681,25 @@ function getRiskData(responses, QUESTIONS) {
     let riskScore = likelihood * impact;
     let riskLevel = riskScore>=7?"High":riskScore>=4?"Medium":"Low";
     let response = riskLevel==="High"?"Mitigate / Avoid":riskLevel==="Medium"?"Mitigate / Transfer":"Accept / Monitor";
-    riskRows.push({asset,threat,vuln,consequence});
-    matrixRows.push({asset,likelihood,impact,riskLevel});
-    responseRows.push({asset,riskLevel,response});
+    
+    riskRows.push({asset, threat, vuln, consequence});
+    matrixRows.push({asset, likelihood, impact, riskLevel});
+    responseRows.push({asset, riskLevel, response});
     heatmap[impact-1][likelihood-1].push(riskLevel);
   }
+  
+  // เรียงลำดับตามระดับความเสี่ยง
+  const riskOrder = { "High": 1, "Medium": 2, "Low": 3 };
+  matrixRows.sort((a, b) => riskOrder[a.riskLevel] - riskOrder[b.riskLevel]);
+  responseRows.sort((a, b) => riskOrder[a.riskLevel] - riskOrder[b.riskLevel]);
+  
   return {riskRows, matrixRows, responseRows, heatmap};
 }
 
+// ---------------------------
+// ฟังก์ชันคำนวณ IRP (แบบเต็ม)
+// ---------------------------
 function getIRPData(responses, QUESTIONS) {
-  // Incident type: ถ้าตอบ "ไม่ใช่" ใน 2FA, Patch, Backup, Log, Antivirus, IRP plan, Incident contact, Playbook, Segmentation, Firewall, Cloud
-  // (index: 3,7,11,14,15,16,17,18,22,23,24)
   let types = [];
   if(responses[3]?.choice==="no") types.push("Account Compromise");
   if(responses[7]?.choice==="no") types.push("Vulnerability Exploitation");
@@ -1324,7 +1710,6 @@ function getIRPData(responses, QUESTIONS) {
   if(responses[23]?.choice==="no"||responses[24]?.choice==="no") types.push("Cloud Security Issue");
   if(types.length===0) types.push("General Security Weakness");
 
-  // CIRT Team Roles (ตัวอย่าง)
   const cirtRoles = [
     {name:"นายสมชาย", role:"CIRT Lead", resp:"ควบคุมการตอบสนองเหตุการณ์และตัดสินใจหลัก"},
     {name:"นางสาวพรทิพย์", role:"Technical Lead", resp:"วิเคราะห์เทคนิคและแก้ไขปัญหา"},
@@ -1332,7 +1717,6 @@ function getIRPData(responses, QUESTIONS) {
     {name:"คุณอรทัย", role:"IT Support", resp:"สนับสนุนการกู้คืนระบบและประสานงาน"},
   ];
 
-  // IRP Phases & Actions
   const phases = [
     {
       phase:"Preparation",
@@ -1358,7 +1742,7 @@ function getIRPData(responses, QUESTIONS) {
         {task:"ตรวจสอบความสมบูรณ์ของระบบ", who:"Technical Lead, IT Support"}
       ]
     },
-       {
+    {
       phase:"Post-Incident Activities",
       actions:[
         {task:"สรุปบทเรียนและปรับปรุงแผน", who:"CIRT Lead, Compliance Officer"},
@@ -1367,255 +1751,97 @@ function getIRPData(responses, QUESTIONS) {
       ]
     }
   ];
+  
   return {types, cirtRoles, phases};
 }
 
-function renderProResults(responses, QUESTIONS) {
-  const risk = getRiskData(responses, QUESTIONS);
-   const riskOrder = { "High": 1, "Medium": 2, "Low": 3 };
-  const sortedMatrixRows = [...risk.matrixRows].sort((a, b) => {
-    return riskOrder[a.riskLevel] - riskOrder[b.riskLevel];
-  });
-
-  // Risk Scenario Table
-  document.getElementById('riskScenarioRows').innerHTML = risk.riskRows.map(r=>`
-    <tr>
-      <td>${r.asset}</td>
-      <td>${r.threat}</td>
-      <td>${r.vuln}</td>
-      <td>${r.consequence}</td>
-    </tr>
-  `).join("");
-
-  // --- NEW: Answer Table ---
-  let answerTableHtml = `
-    <div class="mb-6">
-      <div class="font-bold text-lg mb-2">Answer Table</div>
-      <table class="result-table">
-        <thead>
-          <tr>
-            <th>Asset</th>
-            <th>Answer</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${QUESTIONS.map((q, idx) => {
-            const ans = responses[idx]?.choice;
-            let label = ans === "yes" ? "ใช่" : ans === "partial" ? "ไม่แน่ใจ" : ans === "no" ? "ไม่ใช่" : "-";
-            return `<tr>
-              <td>${q.text}</td>
-              <td>${label}</td>
-            </tr>`;
-          }).join("")}
-        </tbody>
-      </table>
+// ----------------------------
+// ฟังก์ชันแสดงคำถาม (ส่วน Quiz)
+// ----------------------------
+function showQuestion(index) {
+  if (index < 0) index = 0;
+  if (index >= QUESTIONS.length) {
+    finishQuiz();
+    return;
+  }
+  
+  current = index;
+  const q = QUESTIONS[index];
+  const resp = responses[index] || {};
+  
+  document.querySelector(".progress-bar").style.width = `${((index + 1) / QUESTIONS.length) * 100}%`;
+  
+  let html = `
+    <div class="question-section">
+      <div class="question-header">
+        <div class="section-tag">${SECTION_ICONS[q.section] || '📋'} ${q.section}</div>
+        <div class="question-num">ข้อที่ ${index + 1} จาก ${QUESTIONS.length}</div>
+      </div>
+      <div class="question-text">${q.text}</div>
+      <div class="choices">
+        <label class="choice-item ${resp.choice === 'yes' ? 'selected' : ''}">
+          <input type="radio" name="q${index}" value="yes" ${resp.choice === 'yes' ? 'checked' : ''}>
+          <span class="choice-text">ใช่</span>
+          <span class="choice-desc">ดำเนินการแล้ว</span>
+        </label>
+        <label class="choice-item ${resp.choice === 'partial' ? 'selected' : ''}">
+          <input type="radio" name="q${index}" value="partial" ${resp.choice === 'partial' ? 'checked' : ''}>
+          <span class="choice-text">ไม่แน่ใจ</span>
+          <span class="choice-desc">อยู่ระหว่างดำเนินการ</span>
+        </label>
+        <label class="choice-item ${resp.choice === 'no' ? 'selected' : ''}">
+          <input type="radio" name="q${index}" value="no" ${resp.choice === 'no' ? 'checked' : ''}>
+          <span class="choice-text">ไม่ใช่</span>
+          <span class="choice-desc">ยังไม่ได้ดำเนินการ</span>
+        </label>
+      </div>
+      <div class="comment-field">
+        <label>หมายเหตุ (ถ้ามี):</label>
+        <textarea id="comment">${resp.comment || ''}</textarea>
+      </div>
     </div>
   `;
-  // แทรก Answer Table ก่อน Risk Level Table
-  document.getElementById('riskMatrixRows').parentElement.insertAdjacentHTML('beforebegin', answerTableHtml);
-
-  // Likelihood & Impact Matrix
-  document.getElementById('riskMatrixRows').innerHTML = sortedMatrixRows.map((r, idx)=>{
-    const qIdx = QUESTIONS.findIndex(q=>q.text===r.asset);
-    return `
-      <tr>
-        <td>${r.asset}</td>
-        <td>${r.likelihood}</td>
-        <td>${r.impact}</td>
-        <td class="risk-${r.riskLevel.toLowerCase()}">
-          ${
-            r.riskLevel === "High"
-            ? `<span style="color:#dc2626;cursor:pointer;text-decoration:underline;font-weight:bold;" class="show-detail" data-idx="${qIdx}" data-risk="high">HIGH</span>`
-            : r.riskLevel === "Medium"
-            ? `<span style="color:#d97706;cursor:pointer;text-decoration:underline;font-weight:bold;" class="show-detail" data-idx="${qIdx}" data-risk="medium">MEDIUM</span>`
-            : `<span style="color:#16a34a;font-weight:bold;">LOW</span>`
-          }
-        </td>
-      </tr>
-    `;
-  }).join("");
-
-  // --- PRO Risk Heatmap ---
-  // Legend
-  const legend = `
-    <div style="margin-bottom:1em;display:flex;gap:1.5em;align-items:center;">
-      <span><span style="display:inline-block;width:1.2em;height:1.2em;background:#fecaca;border-radius:0.3em;margin-right:0.3em;border:1px solid #dc2626;"></span>High</span>
-      <span><span style="display:inline-block;width:1.2em;height:1.2em;background:#fde68a;border-radius:0.3em;margin-right:0.3em;border:1px solid #d97706;"></span>Medium</span>
-      <span><span style="display:inline-block;width:1.2em;height:1.2em;background:#bbf7d0;border-radius:0.3em;margin-right:0.3em;border:1px solid #16a34a;"></span>Low</span>
-      <span style="margin-left:1.5em;color:#64748b;font-size:0.97em;">คลิกหรือชี้ที่ช่องเพื่อดูรายละเอียด</span>
-    </div>
-  `;
-  // ใส่ legend ก่อนตาราง heatmap
-  const heatmapTable = document.querySelector('.heatmap-table');
-  if (heatmapTable && !document.getElementById('heatmapLegend')) {
-    heatmapTable.insertAdjacentHTML('beforebegin', `<div id="heatmapLegend">${legend}</div>`);
-  }
-
-  // Heatmap interactive
-  let heatmapHtml = "";
-  for(let impact=3;impact>=1;impact--) {
-    heatmapHtml += "<tr>";
-    for(let likelihood=1;likelihood<=3;likelihood++) {
-      let levels = risk.heatmap[impact-1][likelihood-1];
-      // หา asset ทั้งหมดใน cell นี้
-      let assets = sortedMatrixRows.filter(r=>r.likelihood===likelihood && r.impact===impact);
-      let cellClass = "heatmap-low";
-      let riskType = "-";
-      if(levels.includes("High")) { cellClass = "heatmap-high"; riskType = "High"; }
-      else if(levels.includes("Medium")) { cellClass = "heatmap-medium"; riskType = "Medium"; }
-      else if(levels.includes("Low")) { cellClass = "heatmap-low"; riskType = "Low"; }
-      let count = assets.length;
-      let assetList = assets.map(r=>`<li>${r.asset}</li>`).join("");
-      heatmapHtml += `
-        <td class="${cellClass} heatmap-cell" style="cursor:pointer;position:relative;" 
-            data-impact="${impact}" data-likelihood="${likelihood}" data-risk="${riskType}" data-assets='${JSON.stringify(assets.map(r=>r.asset))}'>
-          ${count ? `<b>${count}</b>` : "-"}
-          <div class="heatmap-tooltip" style="display:none;position:absolute;z-index:10;left:50%;top:110%;transform:translateX(-50%);background:#fff;border:1px solid #e0e7ef;border-radius:0.7em;box-shadow:0 2px 12px #38bdf822;padding:1em;min-width:220px;">
-            <div style="font-weight:bold;color:#0ea5e9;">Impact: ${impact}, Likelihood: ${likelihood}</div>
-            <div style="margin:0.3em 0 0.5em 0;"><span style="font-weight:bold;color:${riskType==="High"?"#dc2626":riskType==="Medium"?"#d97706":"#16a34a"};">${riskType}</span></div>
-            ${count ? `<div style="font-size:0.97em;"><b>Asset:</b><ul style="margin:0.2em 0 0 1.2em;">${assetList}</ul></div>` : `<div style="color:#64748b;">ไม่มีรายการ</div>`}
-          </div>
-        </td>
-      `;
-    }
-    heatmapHtml += "</tr>";
-  }
-  document.getElementById('heatmapGrid').innerHTML = heatmapHtml;
-
-  // Tooltip ฟังก์ชัน
-  document.querySelectorAll('.heatmap-cell').forEach(cell=>{
-    cell.addEventListener('mouseenter', function() {
-      this.querySelector('.heatmap-tooltip').style.display = 'block';
-    });
-    cell.addEventListener('mouseleave', function() {
-      this.querySelector('.heatmap-tooltip').style.display = 'none';
-    });
-    cell.addEventListener('click', function() {
-      const tooltip = this.querySelector('.heatmap-tooltip');
-      tooltip.style.display = tooltip.style.display === 'block' ? 'none' : 'block';
+  
+  document.getElementById("questionContainer").innerHTML = html;
+  document.getElementById("prevBtn").style.visibility = index === 0 ? "hidden" : "visible";
+  document.getElementById("nextBtn").textContent = index === QUESTIONS.length - 1 ? "เสร็จสิ้น" : "ถัดไป";
+  
+  // เพิ่ม Event listener สำหรับการเลือกคำตอบ
+  document.querySelectorAll('.choice-item').forEach(item => {
+    item.addEventListener('click', function() {
+      document.querySelectorAll('.choice-item').forEach(el => el.classList.remove('selected'));
+      this.classList.add('selected');
     });
   });
-
-  // Risk Response Table
-  document.getElementById('riskResponseRows').innerHTML = risk.responseRows.map(r=>`
-    <tr>
-      <td>${r.asset}</td>
-      <td class="risk-${r.riskLevel.toLowerCase()}">${r.riskLevel.toUpperCase()}</td>
-      <td>${r.response}</td>
-    </tr>
-  `).join("");
-
-  // IRP (เหมือนเดิม)
-  const irp = getIRPData(responses, QUESTIONS);
-  document.getElementById('incidentSummary').innerHTML = `
-    <b>Incident Classification:</b> <span style="color:#0ea5e9">${irp.types.join(", ")}</span>
-  `;
-  document.getElementById('cirtRolesRows').innerHTML = irp.cirtRoles.map(r=>`
-    <tr>
-      <td>${r.name}</td>
-      <td>${r.role}</td>
-      <td>${r.resp}</td>
-    </tr>
-  `).join("");
-  document.getElementById('irpStepper').innerHTML = irp.phases.map((p,i)=>`
-    <div class="stepper-phase">
-      <div class="stepper-dot"></div>
-      <div class="stepper-title">${i+1}. ${p.phase}</div>
-      <table class="result-table stepper-table">
-        <thead>
-          <tr>
-            <th>Key Action</th>
-            <th>Responsible</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${p.actions.map(a=>`
-            <tr>
-              <td>${a.task}</td>
-              <td>${a.who}</td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-  `).join("");
-  document.getElementById('proResultsSection').style.display = "block";
-
-  // Event: เมื่อคลิก HIGH หรือ MEDIUM (ที่เป็นตัวอักษร)
-  setTimeout(()=>{
-    document.querySelectorAll('.show-detail').forEach(cell=>{
-      cell.onclick = function() {
-        const i = +cell.getAttribute('data-idx');
-        const riskType = cell.getAttribute('data-risk');
-        const q = QUESTIONS[i];
-        const ans = responses[i]?.choice;
-        const score = SCORE_MAP[ans];
-        let riskColor = riskType === "high" ? "#dc2626" : "#d97706";
-        let riskLabel = riskType === "high" ? "เสี่ยงสูง" : "เสี่ยงปานกลาง";
-        let html = `
-          <div class="mb-3">
-            <span style="font-size:1.2em;font-weight:bold;">${q.text}</span>
-          </div>
-          <div class="mb-2"><b>คำตอบ:</b> <span style="color:#0ea5e9;">${LABEL_MAP[ans]||"-"}</span> (คะแนน: ${score})</div>
-          <div class="mb-2"><b>ระดับความเสี่ยง:</b> <span style="color:${riskColor};font-weight:bold;">${riskLabel}</span></div>
-          <div class="mb-2"><b>ความเสี่ยง:</b> <span style="color:${riskColor};">${q.risk}</span></div>
-          <div class="mb-2"><b>คำแนะนำ:</b> <span style="color:#0ea5e9;">${q.fix}</span></div>
-          <div class="mb-2"><b>ขั้นตอนการแก้ไข:</b>
-            <ul>${q.steps.map(step=>`<li>${step}</li>`).join("")}</ul>
-          </div>
-          ${responses[i]?.comment ? `<div class="mb-2"><b>หมายเหตุ:</b> ${responses[i].comment}</div>` : ""}
-        `;
-        document.getElementById('riskHighModalBody').innerHTML = html;
-        new bootstrap.Modal(document.getElementById('riskHighModal')).show();
-      };
-    });
-  }, 100);
 }
 
-// ---------------------------
-// ส่วน: จัดการสถานะเปิดปิดของ IRP panel
-// ---------------------------
-(function() {
-  const toggle = document.getElementById('irp-toggle');
-  const panel = document.getElementById('irp-panel');
-  const caret = document.getElementById('irp-caret');
-  const storageKey = 'incidentResponsePanel:open';
+function prevQuestion() {
+  saveCurrentResponse();
+  showQuestion(current - 1);
+}
 
-  // โหลดสถานะจาก localStorage
-  let open = localStorage.getItem(storageKey) === "1";
-  setPanel(open);
-
-  function setPanel(isOpen) {
-    if(isOpen) {
-      panel.classList.add('open');
-      panel.setAttribute('aria-hidden', 'false');
-      toggle.setAttribute('aria-expanded', 'true');
-      caret.style.transform = "rotate(90deg)";
-      localStorage.setItem(storageKey, "1");
-    } else {
-      panel.classList.remove('open');
-      panel.setAttribute('aria-hidden', 'true');
-      toggle.setAttribute('aria-expanded', 'false');
-      caret.style.transform = "rotate(0deg)";
-      localStorage.setItem(storageKey, "0");
-    }
+function nextQuestion() {
+  if (!saveCurrentResponse()) {
+    alert("กรุณาเลือกคำตอบ");
+    return;
   }
+  showQuestion(current + 1);
+}
 
-  function handleToggle(e) {
-    if(e.type === "click" || e.key === "Enter" || e.key === " ") {
-      open = !open;
-      setPanel(open);
-      e.preventDefault();
-    }
-  }
-  toggle.addEventListener('click', handleToggle);
-  toggle.addEventListener('keydown', handleToggle);
+function saveCurrentResponse() {
+  const selected = document.querySelector(`input[name="q${current}"]:checked`);
+  if (!selected) return false;
+  
+  const comment = document.getElementById("comment").value;
+  responses[current] = { choice: selected.value, comment };
+  sessionStorage.setItem('cyberResponses', JSON.stringify(responses));
+  return true;
+}
 
-  // Responsive: ปรับ max-height เมื่อขนาด panel เปลี่ยน
-  window.addEventListener('resize', ()=>{
-    if(open) setPanel(true);
-  });
-})();
+function finishQuiz() {
+  sessionStorage.setItem('cyberResponses', JSON.stringify(responses));
+  renderResultsView();
+}
 </script>
 </body>
 </html>
